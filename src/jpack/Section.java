@@ -8,6 +8,12 @@ import java.util.regex.*;
 
 public interface Section {
 
+    /**
+     *
+     * @param vendor the set of vendor library names
+     * @param transformer applied to the contents of files based on their filename (e.g. stringify .html)
+     * @return
+     */
     String getContents(Set<String> vendor, BiFunction<String, String, String> transformer);
 
     class StringSection implements Section {
