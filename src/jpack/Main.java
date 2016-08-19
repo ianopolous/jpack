@@ -15,7 +15,7 @@ public class Main {
         Section tree = Section.parse(root);
 
         BiFunction<String, String, String> transformer = (filename, contents) ->
-                ! filename.endsWith(".html") ? contents :
+                ! filename.endsWith(".html") ? "function(require,module,exports){" + contents + "}" :
                         "\"" + contents.replaceAll("\"", "\\\\\"") + "\"";
 
         Set<File> vendorRoots = Stream.of("vendor/dev","vendor/min" , "vendor/common")
