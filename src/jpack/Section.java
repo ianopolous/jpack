@@ -72,7 +72,9 @@ public interface Section {
                 line = line + "\n";
                 Matcher m = pat.matcher(line);
 
-                if (m.find()) {
+                if (!m.find())
+                    current.append(line);
+                else while (true) {
                     int startIndex = m.start(0);
                     current.append(line.substring(0, startIndex));
                     if (current.length() > 0) {
@@ -82,11 +84,18 @@ public interface Section {
 
                     sections.add(new RequireSection(root.subpath(0, root.getNameCount() - 1).resolve(m.group(1))));
 
-                    if (line.length() > m.end(0))
-                        current.append(line.substring(m.end(0)));
-
-                } else
-                    current.append(line);
+                    if (line.length() > m.end(0)) {
+                        // handle remainder of line (could be long in minified js)
+                        line = line.substring(m.end(0));
+                        m = pat.matcher(line);
+                        if (m.find())
+                            continue;
+                        else {
+                            current.append(line);
+                            break;
+                        }
+                    } else break;
+                }
             }
             if (current.length() > 0)
                 sections.add(new StringSection(current.toString()));
