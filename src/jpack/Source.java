@@ -57,7 +57,7 @@ public class Source {
                     int startIndex = m.start(0);
                     current.append(line.substring(0, startIndex));
 
-                    Source source = parseSourceTree(root.subpath(0, root.getNameCount() - 1).resolve(m.group(1)), nextLabel, existing, vendor);
+                    Source source = parseSourceTree(root.getParent().resolve(m.group(1)), nextLabel, existing, vendor);
                     deps.put(m.group(1), Integer.toString(source.id));
                     current.append(m.group());
 
