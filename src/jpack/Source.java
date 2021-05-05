@@ -7,6 +7,8 @@ import java.util.concurrent.atomic.*;
 import java.util.function.*;
 import java.util.regex.*;
 
+import org.graalvm.polyglot.*;
+
 public class Source {
     private final int id;
     private final String contents;
@@ -33,7 +35,31 @@ public class Source {
         return id;
     }
 
-    private static Source parseSourceTree(Path root, AtomicInteger nextLabel, Map<Path, Source> existing, Set<String> vendor) {
+    private static List<String> compileTemplate(Path htmlFile) {
+        try {
+            String template = Files.readString(htmlFile);
+            Context js = Context.create("js");
+            js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
+            Value compileFunc = js.getBindings("js").getMember("compile");
+            Value compiled = compileFunc.execute(template);
+            String render = compiled.getMember("render").asString();
+            Value staticRenderFns = compiled.getMember("staticRenderFns");
+            List<String> res = new ArrayList<>();
+            res.add(render);
+            if (staticRenderFns.hasArrayElements()) {
+                for (int i=0; i < staticRenderFns.getArraySize(); i++)
+                    res.add(staticRenderFns.getArrayElement(i).asString());
+            }
+            return res;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static Source parseSourceTree(Path root,
+                                          AtomicInteger nextLabel,
+                                          Map<Path, Source> existing,
+                                          Set<String> vendor) {
         Path p = root;
         if (root.toFile().isDirectory())
             root = root.resolve("index.js");
@@ -55,11 +81,33 @@ public class Source {
                     current.append(line);
                 else while (true) {
                     int startIndex = m.start(0);
-                    current.append(line.substring(0, startIndex));
+                    String prior = line.substring(0, startIndex);
+                    boolean isTemplate = prior.endsWith("template: ");
+                    if (isTemplate) {
+                        current.append(line.substring(0, startIndex - 10));
+                        current.append("render: function() {");
+                    } else
+                        current.append(prior);
 
-                    Source source = parseSourceTree(root.getParent().resolve(m.group(1)), nextLabel, existing, vendor);
-                    deps.put(m.group(1), Integer.toString(source.id));
-                    current.append(m.group());
+                    if (root.getParent() == null)
+                        System.out.println("null parent of " + root);
+                    
+                    if (isTemplate) {
+                        List<String> compiled = compileTemplate(root.getParent().resolve(m.group(1)));
+                        current.append(compiled.get(0));
+                        current.append("}");
+                        if (compiled.size() > 1) {
+                            current.append(",staticRenderFns: [");
+                            for (int i=1; i < compiled.size(); i++) {
+                                current.append("function() {" + compiled.get(i) + "},");
+                            }
+                            current.append("]");
+                        }
+                    } else {
+                        Source source = parseSourceTree(root.getParent().resolve(m.group(1)), nextLabel, existing, vendor);
+                        deps.put(m.group(1), Integer.toString(source.id));
+                        current.append(m.group());
+                    }
 
                     if (line.length() > m.end(0)) {
                         // handle remainder of line (could be long in minified js)

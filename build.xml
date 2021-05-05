@@ -9,7 +9,7 @@
 
   <path id="dep.runtime">
     <fileset dir="./lib">
-        <include name="**/*.jar" />
+        <include name="*.jar" />
     </fileset>
   </path>
 
@@ -38,7 +38,8 @@
     </manifestclasspath>
     <jar jarfile="${dist}/JPack.jar" basedir="${build}">
       <manifest>
-	  <attribute name="Main-Class" value="jpack.Main"/>
+	<attribute name="Main-Class" value="jpack.Main"/>
+        <attribute name="Class-Path" value="${manifest_cp}"/>
       </manifest>
     </jar>
     <copy todir=".">
