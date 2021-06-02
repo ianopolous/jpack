@@ -57,7 +57,7 @@ public class Main {
         Args args = Args.parse(cmd);
         Path root = new File(args.getArg("root")).toPath();
         Path out = new File(args.getArg("out")).toPath();
-
+        boolean compileTemplates = args.getBoolean("compile-templates", true);
 
         BiFunction<String, String, String> transformer = (filename, contents) ->
                 (! filename.endsWith(".html") ? contents :
@@ -74,7 +74,7 @@ public class Main {
                 .flatMap(f -> Stream.of(f.listFiles()).map(g -> nameExtractor.apply(g.getName())))
                 .collect(Collectors.toSet());
 
-        Map<Path, Source> sources = Source.parseSourceTree(root, vendor);
+        Map<Path, Source> sources = Source.parseSourceTree(root, vendor, compileTemplates);
 
         // only overwrite file when we know there are no exceptions
         BufferedWriter writer = new BufferedWriter(new FileWriter(out.toFile()));

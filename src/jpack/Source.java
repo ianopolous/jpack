@@ -56,10 +56,19 @@ public class Source {
         }
     }
 
+    private static String readTemplate(Path htmlFile) {
+        try {
+            return Files.readString(htmlFile);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static Source parseSourceTree(Path root,
                                           AtomicInteger nextLabel,
                                           Map<Path, Source> existing,
-                                          Set<String> vendor) {
+                                          Set<String> vendor,
+                                          boolean compileTemplates) {
         Path p = root;
         if (root.toFile().isDirectory())
             root = root.resolve("index.js");
@@ -83,7 +92,7 @@ public class Source {
                     int startIndex = m.start(0);
                     String prior = line.substring(0, startIndex);
                     boolean isTemplate = prior.endsWith("template: ");
-                    if (isTemplate) {
+                    if (isTemplate && compileTemplates) {
                         current.append(line.substring(0, startIndex - 10));
                         current.append("render: function() {");
                     } else
@@ -92,7 +101,7 @@ public class Source {
                     if (root.getParent() == null)
                         System.out.println("null parent of " + root);
                     
-                    if (isTemplate) {
+                    if (isTemplate && compileTemplates) {
                         List<String> compiled = compileTemplate(root.getParent().resolve(m.group(1)));
                         current.append(compiled.get(0));
                         current.append("}");
@@ -104,7 +113,7 @@ public class Source {
                             current.append("]");
                         }
                     } else {
-                        Source source = parseSourceTree(root.getParent().resolve(m.group(1)), nextLabel, existing, vendor);
+                        Source source = parseSourceTree(root.getParent().resolve(m.group(1)), nextLabel, existing, vendor, compileTemplates);
                         deps.put(m.group(1), Integer.toString(source.id));
                         current.append(m.group());
                     }
@@ -130,11 +139,11 @@ public class Source {
         }
     }
 
-    public static Map<Path, Source> parseSourceTree(Path root, Set<String> vendor) {
+    public static Map<Path, Source> parseSourceTree(Path root, Set<String> vendor, boolean compileTemplates) {
         // can't start at 0 because JS is mental
         AtomicInteger startLabel = new AtomicInteger(1);
         Map<Path, Source> res = new TreeMap<>();
-        parseSourceTree(root, startLabel, res, vendor);
+        parseSourceTree(root, startLabel, res, vendor, compileTemplates);
         return res;
     }
 }
