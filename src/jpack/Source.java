@@ -35,9 +35,13 @@ public class Source {
         return id;
     }
 
-    private static List<String> compileTemplate(Path htmlFile) {
+    private static List<String> compileTemplate(Path htmlFile) throws IOException {
+        String template = Files.readString(htmlFile);
+        return compileTemplate(template);
+    }
+
+    private static List<String> compileTemplate(String template) throws IOException {
         try {
-            String template = Files.readString(htmlFile);
             Context js = Context.create("js");
             js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
             Value compileFunc = js.getBindings("js").getMember("compile");
@@ -64,56 +68,117 @@ public class Source {
         }
     }
 
+    private static void parseCss(BufferedReader reader, StringBuilder cssOutput) throws IOException {
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (line.trim().equals("</style>"))
+                return;
+            line = line + "\n";
+            cssOutput.append(line);
+        }
+    }
+
+    private static String readInlineTemplate(BufferedReader reader) throws IOException {
+        StringBuilder res = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (line.trim().equals("</template>"))
+                return res.toString();
+            line = line + "\n";
+            res.append(line);
+        }
+        return res.toString();
+    }
+
+    private static void renderCompiledTemplate(List<String> compiled, StringBuilder current) {
+        current.append("render: function() {");
+        current.append(compiled.get(0));
+        current.append("}");
+        if (compiled.size() > 1) {
+            current.append(",staticRenderFns: [");
+            for (int i=1; i < compiled.size(); i++) {
+                current.append("function() {" + compiled.get(i) + "},");
+            }
+            current.append("]");
+        }
+    }
+    
     private static Source parseSourceTree(Path root,
                                           AtomicInteger nextLabel,
                                           Map<Path, Source> existing,
                                           Set<String> vendor,
-                                          boolean compileTemplates) {
+                                          boolean compileTemplates,
+                                          StringBuilder cssOutput) {
         Path p = root;
         if (root.toFile().isDirectory())
             root = root.resolve("index.js");
         if (vendor.contains(p.toFile().getName()))
             return null;
+        boolean isComponent = root.toFile().getName().endsWith(".vue");
 
         String requirePattern = "require\\([\"']([\\./a-zA-Z0-9\\-_]+)[\"']\\)[;]*";
         Pattern pat = Pattern.compile(requirePattern);
         try {
             BufferedReader reader = new BufferedReader(new FileReader(root.toFile()));
-            String line;
+            String line, template = null;
             StringBuilder current = new StringBuilder();
             Map<String, String> deps = new HashMap<>();
+            boolean inScript = false;
             while ((line = reader.readLine()) != null) {
                 line = line + "\n";
+                if (isComponent && line.trim().startsWith("<style")) {
+                    boolean scoped = line.contains("scoped");
+                    parseCss(reader, cssOutput);
+                    continue;
+                }
+                if (isComponent && line.trim().startsWith("<template")) {
+                    template = readInlineTemplate(reader);
+                    continue;
+                }
+                if (isComponent && line.trim().startsWith("<script")) {
+                    inScript = true;
+                    continue;
+                }
+                if (isComponent && line.trim().equals("</script>")) {
+                    inScript = false;
+                    continue;
+                }
                 Matcher m = pat.matcher(line);
 
-                if (!m.find())
+                if (!m.find()) {
                     current.append(line);
-                else while (true) {
+                    if (isComponent && line.trim().startsWith("module.exports")) {
+                        if (template == null)
+                            throw new IllegalStateException("template needs to be defined before <script> in " + root);
+                        if (compileTemplates) {
+                            List<String> compiled = compileTemplate(template);
+                            renderCompiledTemplate(compiled, current);
+                            current.append(",");
+                        } else {
+                            String name = root.toFile().getName() + ".template";
+                            Path templatePath = root.getParent().resolve(name);
+                            Source tmpl = new Source(nextLabel.getAndIncrement(), template, templatePath, Collections.emptyMap());
+                            existing.put(templatePath, tmpl);
+                            current.append("template: require('");
+                            current.append(name);
+                            current.append("'),");
+                        }
+                    }
+                } else while (true) {
                     int startIndex = m.start(0);
                     String prior = line.substring(0, startIndex);
                     boolean isTemplate = prior.endsWith("template: ");
-                    if (isTemplate && compileTemplates) {
-                        current.append(line.substring(0, startIndex - 10));
-                        current.append("render: function() {");
-                    } else
-                        current.append(prior);
 
                     if (root.getParent() == null)
                         System.out.println("null parent of " + root);
                     
                     if (isTemplate && compileTemplates) {
+                        current.append(line.substring(0, startIndex - 10));
                         List<String> compiled = compileTemplate(root.getParent().resolve(m.group(1)));
-                        current.append(compiled.get(0));
-                        current.append("}");
-                        if (compiled.size() > 1) {
-                            current.append(",staticRenderFns: [");
-                            for (int i=1; i < compiled.size(); i++) {
-                                current.append("function() {" + compiled.get(i) + "},");
-                            }
-                            current.append("]");
-                        }
+                        renderCompiledTemplate(compiled, current);
                     } else {
-                        Source source = parseSourceTree(root.getParent().resolve(m.group(1)), nextLabel, existing, vendor, compileTemplates);
+                        current.append(prior);
+                        Source source = parseSourceTree(root.getParent().resolve(m.group(1)), nextLabel, existing, vendor, compileTemplates, cssOutput);
                         deps.put(m.group(1), Integer.toString(source.id));
                         current.append(m.group());
                     }
@@ -139,11 +204,11 @@ public class Source {
         }
     }
 
-    public static Map<Path, Source> parseSourceTree(Path root, Set<String> vendor, boolean compileTemplates) {
+    public static Map<Path, Source> parseSourceTree(Path root, Set<String> vendor, boolean compileTemplates, StringBuilder cssOutput) {
         // can't start at 0 because JS is mental
         AtomicInteger startLabel = new AtomicInteger(1);
         Map<Path, Source> res = new TreeMap<>();
-        parseSourceTree(root, startLabel, res, vendor, compileTemplates);
+        parseSourceTree(root, startLabel, res, vendor, compileTemplates, cssOutput);
         return res;
     }
 }

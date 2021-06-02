@@ -57,6 +57,7 @@ public class Main {
         Args args = Args.parse(cmd);
         Path root = new File(args.getArg("root")).toPath();
         Path out = new File(args.getArg("out")).toPath();
+        Path cssOut = new File(args.getArg("css-out")).toPath();
         boolean compileTemplates = args.getBoolean("compile-templates", true);
 
         BiFunction<String, String, String> transformer = (filename, contents) ->
@@ -74,22 +75,24 @@ public class Main {
                 .flatMap(f -> Stream.of(f.listFiles()).map(g -> nameExtractor.apply(g.getName())))
                 .collect(Collectors.toSet());
 
-        Map<Path, Source> sources = Source.parseSourceTree(root, vendor, compileTemplates);
+        StringBuilder css = new StringBuilder();
+        Map<Path, Source> sources = Source.parseSourceTree(root, vendor, compileTemplates, css);
 
-        // only overwrite file when we know there are no exceptions
-        BufferedWriter writer = new BufferedWriter(new FileWriter(out.toFile()));
+        // only overwrite files when we know there are no exceptions
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(out.toFile()))) {
+            writer.write(PREFIX);
+            writer.write("({");
+            writer.write(sources.values().stream()
+                         .map(s -> s.getContents(transformer))
+                         .reduce("", (a, b) -> a +", " + b)
+                         .substring(1));
+            writer.write("},{},");
+            writer.write("[" + sources.get(root).getId() + "]");
+            writer.write(");");
+        }
 
-        writer.write(PREFIX);
-        writer.write("({");
-        writer.write(sources.values().stream()
-                .map(s -> s.getContents(transformer))
-                .reduce("", (a, b) -> a +", " + b)
-                .substring(1));
-        writer.write("},{},");
-        writer.write("[" + sources.get(root).getId() + "]");
-        writer.write(");");
-
-        writer.flush();
-        writer.close();
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(cssOut.toFile()))) {
+            writer.write(css.toString());
+        }
     }
 }
