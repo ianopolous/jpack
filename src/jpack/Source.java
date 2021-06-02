@@ -6,6 +6,7 @@ import java.util.*;
 import java.util.concurrent.atomic.*;
 import java.util.function.*;
 import java.util.regex.*;
+import java.security.*;
 
 import org.graalvm.polyglot.*;
 
@@ -68,12 +69,14 @@ public class Source {
         }
     }
 
-    private static void parseCss(BufferedReader reader, StringBuilder cssOutput) throws IOException {
+    private static void parseCss(BufferedReader reader, StringBuilder cssOutput, boolean scoped, String prefix) throws IOException {
         String line;
         while ((line = reader.readLine()) != null) {
             if (line.trim().equals("</style>"))
                 return;
             line = line + "\n";
+            if (scoped)
+                throw new IllegalStateException("Scoped css unimplemented!");
             cssOutput.append(line);
         }
     }
@@ -102,6 +105,36 @@ public class Source {
             current.append("]");
         }
     }
+
+    private static String[] HEX_DIGITS = new String[]{
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"};
+    private static String[] HEX = new String[256];
+    static {
+        for (int i=0; i < 256; i++)
+            HEX[i] = HEX_DIGITS[(i >> 4) & 0xF] + HEX_DIGITS[i & 0xF];
+    }
+
+    public static String byteToHex(byte b) {
+        return HEX[b & 0xFF];
+    }
+
+    public static String bytesToHex(byte[] data)
+    {
+        StringBuilder s = new StringBuilder();
+        for (byte b : data)
+            s.append(byteToHex(b));
+        return s.toString();
+    }
+
+    private static String generatePrefix(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(input.getBytes("UTF-8"));
+            return "data-v" + bytesToHex(md.digest()).substring(0, 8);
+        } catch (NoSuchAlgorithmException|UnsupportedEncodingException e) {
+            throw new RuntimeException(e);
+        }
+    }
     
     private static Source parseSourceTree(Path root,
                                           AtomicInteger nextLabel,
@@ -128,7 +161,7 @@ public class Source {
                 line = line + "\n";
                 if (isComponent && line.trim().startsWith("<style")) {
                     boolean scoped = line.contains("scoped");
-                    parseCss(reader, cssOutput);
+                    parseCss(reader, cssOutput, scoped, scoped ? generatePrefix(root.toString()) : "");
                     continue;
                 }
                 if (isComponent && line.trim().startsWith("<template")) {
