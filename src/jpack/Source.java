@@ -190,8 +190,9 @@ public class Source {
                         } else {
                             String name = root.toFile().getName() + ".template";
                             Path templatePath = root.getParent().resolve(name);
-                            Source tmpl = new Source(nextLabel.getAndIncrement(), template, templatePath, Collections.emptyMap());
+                            Source tmpl = new Source(nextLabel.getAndIncrement(), "module.exports =\"" + template.replaceAll("\"", "\\\\\"").replaceAll("\n", "") + "\"", templatePath, Collections.emptyMap());
                             existing.put(templatePath, tmpl);
+                            deps.put(name, Integer.toString(tmpl.id));
                             current.append("template: require('");
                             current.append(name);
                             current.append("'),");
