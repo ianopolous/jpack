@@ -176,9 +176,10 @@ public class Source {
                     inScript = false;
                     continue;
                 }
+                boolean isComment = line.trim().startsWith("//");
                 Matcher m = pat.matcher(line);
 
-                if (!m.find()) {
+                if (isComment || !m.find()) {
                     current.append(line);
                     if (isComponent && line.trim().startsWith("module.exports")) {
                         if (template == null)
