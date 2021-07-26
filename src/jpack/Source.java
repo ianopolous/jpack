@@ -147,6 +147,8 @@ public class Source {
             root = root.resolve("index.js");
         if (vendor.contains(p.toFile().getName()))
             return null;
+        if (existing.containsKey(root))
+            return existing.get(root);
         boolean isComponent = root.toFile().getName().endsWith(".vue");
 
         String requirePattern = "require\\([\"']([\\./a-zA-Z0-9\\-_]+)[\"']\\)[;]*";
