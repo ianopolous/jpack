@@ -84,8 +84,13 @@ public class Source {
     private static String readInlineTemplate(BufferedReader reader) throws IOException {
         StringBuilder res = new StringBuilder();
         String line;
+        int depth = 1;
         while ((line = reader.readLine()) != null) {
+            if (line.trim().startsWith("<template"))
+                depth++;
             if (line.trim().equals("</template>"))
+                depth--;
+            if (depth == 0)
                 return res.toString();
             line = line + "\n";
             res.append(line);
