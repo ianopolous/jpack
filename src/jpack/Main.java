@@ -64,8 +64,10 @@ public class Main {
                 (! filename.endsWith(".html") ? contents :
                         "module.exports = \"" + contents.replaceAll("\"", "\\\\\"").replaceAll("\n", "\\\\n") + "\";\n");
 
-        Set<File> vendorRoots = Stream.of("vendor/dev","vendor/min" , "vendor/common")
-                .map(File::new)
+        Set<File> vendorRoots = Stream.of(Path.of("vendor", "dev"),
+                                          Path.of("vendor", "min") ,
+                                          Path.of("vendor", "common"))
+                .map(Path::toFile)
                 .collect(Collectors.toSet());
 
         Function<String, String> nameExtractor = filename -> filename.contains(".") ?
