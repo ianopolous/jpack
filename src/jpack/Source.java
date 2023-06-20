@@ -36,12 +36,12 @@ public class Source {
         return id;
     }
 
-    private static List<String> compileTemplate(Path htmlFile) throws IOException {
+    private static List<String> compileSFC(Path htmlFile) throws IOException {
         String template = Files.readString(htmlFile);
-        return compileTemplate(template);
+        return compileSFC(template);
     }
 
-    private static List<String> compileTemplate(String template) throws IOException {
+    private static List<String> compileSFC(String template) throws IOException {
         try {
             Context js = Context.create("js");
             js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
@@ -61,7 +61,41 @@ public class Source {
         }
     }
 
-    private static String readTemplate(Path htmlFile) {
+    private static List<String> compileTemplate(String template) throws IOException {
+        try {
+            Context js = Context.create("js");
+            js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
+            Value parse = js.getBindings("js").getMember("parse");
+            Value parsed = parse.execute(template);
+            Value compileFunc = js.getBindings("js").getMember("compileTemplate");
+            Value compiled = compileFunc.execute(parsed.getMember("descriptor"));
+            String render = compiled.getMember("code").asString();
+            List<String> res = new ArrayList<>();
+            res.add(render);
+            return res;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static List<String> compileScript(String template) throws IOException {
+        try {
+            Context js = Context.create("js");
+            js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
+            Value parse = js.getBindings("js").getMember("parse");
+            Value parsed = parse.execute(template);
+            Value compileFunc = js.getBindings("js").getMember("compileScript");
+            Value compiled = compileFunc.execute(parsed.getMember("descriptor"));
+            String content = compiled.getMember("content").asString();
+            List<String> res = new ArrayList<>();
+            res.add(content);
+            return res;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static String readSFC(Path htmlFile) {
         try {
             return Files.readString(htmlFile);
         } catch (IOException e) {
@@ -157,7 +191,9 @@ public class Source {
         boolean isComponent = root.toFile().getName().endsWith(".vue");
 
         String requirePattern = "require\\([\"']([\\./a-zA-Z0-9\\-_]+)[\"']\\)[;]*";
+        String importPattern = "import ([\\./a-zA-Z0-9 {}\\-_]+) from [\"']([\\./a-zA-Z0-9\\-_]+)[\"'][;]*";
         Pattern pat = Pattern.compile(requirePattern);
+        Pattern importPat = Pattern.compile(importPattern);
         try {
             BufferedReader reader = new BufferedReader(new FileReader(root.toFile()));
             String line, template = null;
@@ -185,14 +221,17 @@ public class Source {
                 }
                 boolean isComment = line.trim().startsWith("//");
                 Matcher m = pat.matcher(line);
+                Matcher im = importPat.matcher(line);
 
-                if (isComment || !m.find()) {
+                boolean hasRequire = m.find();
+                boolean hasImport = im.find();
+                if (isComment || (!hasRequire && !hasImport)) {
                     current.append(line);
                     if (isComponent && line.trim().startsWith("module.exports")) {
                         if (template == null)
                             throw new IllegalStateException("template needs to be defined before <script> in " + root);
                         if (compileTemplates) {
-                            List<String> compiled = compileTemplate(template);
+                            List<String> compiled = compileSFC(template);
                             renderCompiledTemplate(compiled, current);
                             current.append(",");
                         } else {
@@ -206,6 +245,42 @@ public class Source {
                             current.append("'),");
                         }
                     }
+                } else if (hasImport) {
+                    while (true) {
+                        int startIndex = im.start(0);
+                        String prior = line.substring(0, startIndex);
+                        boolean isTemplate = prior.endsWith("template: ");
+
+                        if (root.getParent() == null)
+                            System.out.println("null parent of " + root);
+
+                        if (isTemplate && compileTemplates) {
+                            current.append(line.substring(0, startIndex - 10));
+                            List<String> compiled = compileSFC(root.getParent().resolve(im.group(2)));
+                            renderCompiledTemplate(compiled, current);
+                        } else {
+                            current.append(prior);
+                            current.append("const ");
+                            Source source = parseSourceTree(root.getParent().resolve(im.group(2)), nextLabel, existing, vendor, compileTemplates, cssOutput);
+                            deps.put(im.group(2), Integer.toString(source.id));
+                            current.append(im.group(1));
+                            current.append(" = require('");
+                            current.append(im.group(2));
+                            current.append("');\n");
+                        }
+
+                        if (line.length() > im.end(0)) {
+                            // handle remainder of line (could be long in minified js)
+                            line = line.substring(im.end(0));
+                            im = pat.matcher(line);
+                            if (im.find())
+                                continue;
+                            else {
+                                current.append(line);
+                                break;
+                            }
+                        } else break;
+                    }
                 } else while (true) {
                     int startIndex = m.start(0);
                     String prior = line.substring(0, startIndex);
@@ -216,7 +291,7 @@ public class Source {
                     
                     if (isTemplate && compileTemplates) {
                         current.append(line.substring(0, startIndex - 10));
-                        List<String> compiled = compileTemplate(root.getParent().resolve(m.group(1)));
+                        List<String> compiled = compileSFC(root.getParent().resolve(m.group(1)));
                         renderCompiledTemplate(compiled, current);
                     } else {
                         current.append(prior);

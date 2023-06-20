@@ -74,7 +74,7 @@ public class Main {
                 filename.substring(0, filename.indexOf(".")) :
                 filename;
         Set<String> vendor = vendorRoots.stream()
-                .flatMap(f -> Stream.of(f.listFiles()).map(g -> nameExtractor.apply(g.getName())))
+                .flatMap(f -> Stream.ofNullable(f.listFiles()).flatMap(Stream::of).map(g -> nameExtractor.apply(g.getName())))
                 .collect(Collectors.toSet());
 
         StringBuilder css = new StringBuilder();
