@@ -147,6 +147,7 @@ public class Source {
                                           Set<String> vendor,
                                           boolean compileTemplates,
                                           StringBuilder cssOutput) {
+        root = root.normalize();
         Path p = root;
         if (root.toFile().isDirectory())
             root = root.resolve("index.js");
