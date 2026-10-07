@@ -29,19 +29,12 @@
   </target>
 
   <target name="dist" depends="compile" description="generate the distribution">
-    <mkdir dir="${dist}/lib"/>
-    <copy todir="${dist}/lib">
-      <fileset dir="lib"/>
-    </copy>
-    <manifestclasspath property="manifest_cp" jarfile="myjar.jar">
-      <classpath refid="dep.runtime" />
-    </manifestclasspath>
+    <!-- the template compiler is bundled in, so JPack.jar runs on its own -->
     <jar jarfile="${dist}/JPack.jar">
       <fileset dir="${build}"/>
-      <fileset dir="resources"/>
+      <zipgroupfileset dir="lib" includes="vue3-template-compiler.jar"/>
       <manifest>
-	<attribute name="Main-Class" value="jpack.Main"/>
-        <attribute name="Class-Path" value="${manifest_cp}"/>
+        <attribute name="Main-Class" value="jpack.Main"/>
       </manifest>
     </jar>
     <copy todir=".">

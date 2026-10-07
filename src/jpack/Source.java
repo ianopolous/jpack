@@ -8,7 +8,7 @@ import java.util.function.*;
 import java.util.regex.*;
 import java.security.*;
 
-import org.graalvm.polyglot.*;
+import vue3.compiler.*;
 
 public class Source {
     private final int id;
@@ -37,49 +37,17 @@ public class Source {
     }
 
     private static List<String> compileTemplate(Path htmlFile) throws IOException {
-        String template = Files.readString(htmlFile);
-        return compileTemplate(template);
+        return compileTemplate(Files.readString(htmlFile), htmlFile, 0);
     }
 
-    private static Value vueCompiler;
-
-    // the compiler bundle has no DOM to decode entities with, so they are decoded here
-    private static final String SHIM = "var __entities = JSON.parse(__entitiesJson);\n" +
-            "function __decodeEntities(raw, asAttr) {\n" +
-            "  return raw.replace(/&(#[xX][0-9a-fA-F]+;?|#[0-9]+;?|[a-zA-Z][a-zA-Z0-9]*;?)/g, function(m, body, offset) {\n" +
-            "    if (body[0] == '#') {\n" +
-            "      var hex = body[1] == 'x' || body[1] == 'X';\n" +
-            "      var cp = parseInt(body.substring(hex ? 2 : 1), hex ? 16 : 10);\n" +
-            "      if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;\n" +
-            "      return String.fromCodePoint(cp);\n" +
-            "    }\n" +
-            "    for (var len = m.length; len > 1; len--) {\n" +
-            "      var e = __entities[m.substring(0, len)];\n" +
-            "      if (e == null) continue;\n" +
-            "      var next = raw.charAt(offset + len);\n" +
-            "      if (asAttr && m.charAt(len - 1) != ';' && /[=a-zA-Z0-9]/.test(next)) return m;\n" +
-            "      return e.characters + m.substring(len);\n" +
-            "    }\n" +
-            "    return m;\n" +
-            "  });\n" +
-            "}\n" +
-            "function __compile(t) { return VueCompilerDOM.compile(t, {hoistStatic: true, decodeEntities: __decodeEntities}).code; }\n" +
-            "__compile";
-
-    private static synchronized Value vueCompiler() throws IOException {
-        if (vueCompiler == null) {
-            Context js = Context.create("js");
-            try (InputStream in = Source.class.getResourceAsStream("/entities.json")) {
-                js.getBindings("js").putMember("__entitiesJson", new String(in.readAllBytes(), "UTF-8"));
-            }
-            js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
-            vueCompiler = js.eval("js", SHIM);
+    /** firstLine is the line of the file before the template's first line */
+    private static List<String> compileTemplate(String template, Path file, int firstLine) {
+        try {
+            return List.of(VueCompiler.compile(template));
+        } catch (CompilerError e) {
+            int line = e.loc != null && e.loc.start != null ? firstLine + e.loc.start.line : firstLine + 1;
+            throw new IllegalStateException(file + ":" + line + ": Vue template error " + e.getMessage(), e);
         }
-        return vueCompiler;
-    }
-
-    private static List<String> compileTemplate(String template) throws IOException {
-        return List.of(vueCompiler().execute(template).asString());
     }
 
     private static String readTemplate(Path htmlFile) {
@@ -177,8 +145,9 @@ public class Source {
         String requirePattern = "require\\([\"']([\\./a-zA-Z0-9\\-_]+)[\"']\\)[;]*";
         Pattern pat = Pattern.compile(requirePattern);
         try {
-            BufferedReader reader = new BufferedReader(new FileReader(root.toFile()));
+            LineNumberReader reader = new LineNumberReader(new FileReader(root.toFile()));
             String line, template = null;
+            int templateLine = 0;
             StringBuilder current = new StringBuilder();
             Map<String, String> deps = new HashMap<>();
             boolean inScript = false;
@@ -190,6 +159,7 @@ public class Source {
                     continue;
                 }
                 if (isComponent && line.trim().startsWith("<template")) {
+                    templateLine = reader.getLineNumber();
                     template = readInlineTemplate(reader);
                     continue;
                 }
@@ -213,7 +183,7 @@ public class Source {
                         String fileName = root.toFile().getName();
                         current.append("__name: \"" + fileName.substring(0, fileName.length() - ".vue".length()) + "\",");
                         if (compileTemplates) {
-                            List<String> compiled = compileTemplate(template);
+                            List<String> compiled = compileTemplate(template, root, templateLine);
                             renderCompiledTemplate(compiled, current);
                             current.append(",");
                         } else {
