@@ -8,7 +8,7 @@ import java.util.function.*;
 import java.util.regex.*;
 import java.security.*;
 
-import org.graalvm.polyglot.*;
+import vue3.compiler.*;
 
 public class Source {
     private final int id;
@@ -37,27 +37,16 @@ public class Source {
     }
 
     private static List<String> compileTemplate(Path htmlFile) throws IOException {
-        String template = Files.readString(htmlFile);
-        return compileTemplate(template);
+        return compileTemplate(Files.readString(htmlFile), htmlFile, 0);
     }
 
-    private static List<String> compileTemplate(String template) throws IOException {
+    /** firstLine is the line of the file before the template's first line */
+    private static List<String> compileTemplate(String template, Path file, int firstLine) {
         try {
-            Context js = Context.create("js");
-            js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
-            Value compileFunc = js.getBindings("js").getMember("compile");
-            Value compiled = compileFunc.execute(template);
-            String render = compiled.getMember("render").asString();
-            Value staticRenderFns = compiled.getMember("staticRenderFns");
-            List<String> res = new ArrayList<>();
-            res.add(render);
-            if (staticRenderFns.hasArrayElements()) {
-                for (int i=0; i < staticRenderFns.getArraySize(); i++)
-                    res.add(staticRenderFns.getArrayElement(i).asString());
-            }
-            return res;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            return List.of(VueCompiler.compile(template));
+        } catch (CompilerError e) {
+            int line = e.loc != null && e.loc.start != null ? firstLine + e.loc.start.line : firstLine + 1;
+            throw new IllegalStateException(file + ":" + line + ": Vue template error " + e.getMessage(), e);
         }
     }
 
@@ -98,17 +87,13 @@ public class Source {
         return res.toString();
     }
 
+    // The compiled code is a function body that returns the render function. It reads the
+    // component through with(_ctx), so it is flagged _rc as Vue's own runtime compiler does,
+    // which gives it the proxy that handles globals and Symbol.unscopables.
     private static void renderCompiledTemplate(List<String> compiled, StringBuilder current) {
-        current.append("render: function() {");
+        current.append("render: Object.assign((function() {");
         current.append(compiled.get(0));
-        current.append("}");
-        if (compiled.size() > 1) {
-            current.append(",staticRenderFns: [");
-            for (int i=1; i < compiled.size(); i++) {
-                current.append("function() {" + compiled.get(i) + "},");
-            }
-            current.append("]");
-        }
+        current.append("})(), {_rc: true})");
     }
 
     private static String[] HEX_DIGITS = new String[]{
@@ -160,8 +145,9 @@ public class Source {
         String requirePattern = "require\\([\"']([\\./a-zA-Z0-9\\-_]+)[\"']\\)[;]*";
         Pattern pat = Pattern.compile(requirePattern);
         try {
-            BufferedReader reader = new BufferedReader(new FileReader(root.toFile()));
+            LineNumberReader reader = new LineNumberReader(new FileReader(root.toFile()));
             String line, template = null;
+            int templateLine = 0;
             StringBuilder current = new StringBuilder();
             Map<String, String> deps = new HashMap<>();
             boolean inScript = false;
@@ -173,6 +159,7 @@ public class Source {
                     continue;
                 }
                 if (isComponent && line.trim().startsWith("<template")) {
+                    templateLine = reader.getLineNumber();
                     template = readInlineTemplate(reader);
                     continue;
                 }
@@ -192,8 +179,11 @@ public class Source {
                     if (isComponent && line.trim().startsWith("module.exports")) {
                         if (template == null)
                             throw new IllegalStateException("template needs to be defined before <script> in " + root);
+                        // as Vue's own SFC compiler does, so warnings and devtools can name the component
+                        String fileName = root.toFile().getName();
+                        current.append("__name: \"" + fileName.substring(0, fileName.length() - ".vue".length()) + "\",");
                         if (compileTemplates) {
-                            List<String> compiled = compileTemplate(template);
+                            List<String> compiled = compileTemplate(template, root, templateLine);
                             renderCompiledTemplate(compiled, current);
                             current.append(",");
                         } else {
