@@ -209,6 +209,9 @@ public class Source {
                     if (isComponent && line.trim().startsWith("module.exports")) {
                         if (template == null)
                             throw new IllegalStateException("template needs to be defined before <script> in " + root);
+                        // as Vue's own SFC compiler does, so warnings and devtools can name the component
+                        String fileName = root.toFile().getName();
+                        current.append("__name: \"" + fileName.substring(0, fileName.length() - ".vue".length()) + "\",");
                         if (compileTemplates) {
                             List<String> compiled = compileTemplate(template);
                             renderCompiledTemplate(compiled, current);
