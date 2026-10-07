@@ -41,24 +41,45 @@ public class Source {
         return compileTemplate(template);
     }
 
-    private static List<String> compileTemplate(String template) throws IOException {
-        try {
+    private static Value vueCompiler;
+
+    // the compiler bundle has no DOM to decode entities with, so they are decoded here
+    private static final String SHIM = "var __entities = JSON.parse(__entitiesJson);\n" +
+            "function __decodeEntities(raw, asAttr) {\n" +
+            "  return raw.replace(/&(#[xX][0-9a-fA-F]+;?|#[0-9]+;?|[a-zA-Z][a-zA-Z0-9]*;?)/g, function(m, body, offset) {\n" +
+            "    if (body[0] == '#') {\n" +
+            "      var hex = body[1] == 'x' || body[1] == 'X';\n" +
+            "      var cp = parseInt(body.substring(hex ? 2 : 1), hex ? 16 : 10);\n" +
+            "      if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;\n" +
+            "      return String.fromCodePoint(cp);\n" +
+            "    }\n" +
+            "    for (var len = m.length; len > 1; len--) {\n" +
+            "      var e = __entities[m.substring(0, len)];\n" +
+            "      if (e == null) continue;\n" +
+            "      var next = raw.charAt(offset + len);\n" +
+            "      if (asAttr && m.charAt(len - 1) != ';' && /[=a-zA-Z0-9]/.test(next)) return m;\n" +
+            "      return e.characters + m.substring(len);\n" +
+            "    }\n" +
+            "    return m;\n" +
+            "  });\n" +
+            "}\n" +
+            "function __compile(t) { return VueCompilerDOM.compile(t, {hoistStatic: true, decodeEntities: __decodeEntities}).code; }\n" +
+            "__compile";
+
+    private static synchronized Value vueCompiler() throws IOException {
+        if (vueCompiler == null) {
             Context js = Context.create("js");
-            js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
-            Value compileFunc = js.getBindings("js").getMember("compile");
-            Value compiled = compileFunc.execute(template);
-            String render = compiled.getMember("render").asString();
-            Value staticRenderFns = compiled.getMember("staticRenderFns");
-            List<String> res = new ArrayList<>();
-            res.add(render);
-            if (staticRenderFns.hasArrayElements()) {
-                for (int i=0; i < staticRenderFns.getArraySize(); i++)
-                    res.add(staticRenderFns.getArrayElement(i).asString());
+            try (InputStream in = Source.class.getResourceAsStream("/entities.json")) {
+                js.getBindings("js").putMember("__entitiesJson", new String(in.readAllBytes(), "UTF-8"));
             }
-            return res;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            js.eval(org.graalvm.polyglot.Source.newBuilder("js", Paths.get("template-compiler.js").toFile()).build());
+            vueCompiler = js.eval("js", SHIM);
         }
+        return vueCompiler;
+    }
+
+    private static List<String> compileTemplate(String template) throws IOException {
+        return List.of(vueCompiler().execute(template).asString());
     }
 
     private static String readTemplate(Path htmlFile) {
@@ -98,17 +119,11 @@ public class Source {
         return res.toString();
     }
 
+    // the compiled code is a function body that returns the render function
     private static void renderCompiledTemplate(List<String> compiled, StringBuilder current) {
-        current.append("render: function() {");
+        current.append("render: (function() {");
         current.append(compiled.get(0));
-        current.append("}");
-        if (compiled.size() > 1) {
-            current.append(",staticRenderFns: [");
-            for (int i=1; i < compiled.size(); i++) {
-                current.append("function() {" + compiled.get(i) + "},");
-            }
-            current.append("]");
-        }
+        current.append("})()");
     }
 
     private static String[] HEX_DIGITS = new String[]{

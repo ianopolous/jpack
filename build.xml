@@ -36,7 +36,9 @@
     <manifestclasspath property="manifest_cp" jarfile="myjar.jar">
       <classpath refid="dep.runtime" />
     </manifestclasspath>
-    <jar jarfile="${dist}/JPack.jar" basedir="${build}">
+    <jar jarfile="${dist}/JPack.jar">
+      <fileset dir="${build}"/>
+      <fileset dir="resources"/>
       <manifest>
 	<attribute name="Main-Class" value="jpack.Main"/>
         <attribute name="Class-Path" value="${manifest_cp}"/>
