@@ -119,11 +119,13 @@ public class Source {
         return res.toString();
     }
 
-    // the compiled code is a function body that returns the render function
+    // The compiled code is a function body that returns the render function. It reads the
+    // component through with(_ctx), so it is flagged _rc as Vue's own runtime compiler does,
+    // which gives it the proxy that handles globals and Symbol.unscopables.
     private static void renderCompiledTemplate(List<String> compiled, StringBuilder current) {
-        current.append("render: (function() {");
+        current.append("render: Object.assign((function() {");
         current.append(compiled.get(0));
-        current.append("})()");
+        current.append("})(), {_rc: true})");
     }
 
     private static String[] HEX_DIGITS = new String[]{
